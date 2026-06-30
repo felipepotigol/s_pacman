@@ -1,5 +1,5 @@
 # ==============================================================================
-# SCRIPT UNIFICADO: EXECUÇÃO DAS 4 ERAS DO ALGORITMO DQN
+# SCRIPT UNIFICADO: EXECUÇÃO DAS 4 ERAS DO ALGORITMO (ORDEM DOS ARQUIVOS)
 # ==============================================================================
 import os
 import time
@@ -16,27 +16,27 @@ gym.register_envs(ale_py)
 ENV_NAME = "ALE/MsPacman-v5"
 
 # ------------------------------------------------------------------------------
-# 🎛️ CONFIGURAÇÃO DE SELEÇÃO DO ALGORITMO
-# Escolha qual das 4 fases da evolução você deseja assistir jogando:
-# 1 = DQN Tradicional Clássico (Viés de Superestimação / Apenas Imagem)
-# 2 = Double DQN (DDQN) (Correção matemática de alvos / Apenas Imagem)
-# 3 = Dueling Double DQN (Divisão de Fluxo Valor/Vantagem + Reward Shaping)
-# 4 = Dueling DDQN Híbrido Multi-Input (O ápice: Imagem + Telemetria da RAM)
+# 🎛️ CONFIGURAÇÃO DE SELEÇÃO DO MODELO
+# Escolha qual arquivo exato da sua pasta você deseja assistir jogando:
+# 1 = dqn_mspacman.keras          (Era 1: Double DQN Clássico - Puro Visual)
+# 2 = dqn_mspacman_v2.keras       (Era 2: Reward Shaped + Correção de Buffer)
+# 3 = dueling_ddqn_mspacman.h5    (Era 3: Transplante de Pesos / Fusão Estrutural)
+# 4 = dueling_ddqn_hybrid.h5      (Era 4: Híbrido Final Treinado - Epsilon 0.02)
 ERA_DO_MODELO = 4  
 # ------------------------------------------------------------------------------
 
-# Mapeamento exato dos arquivos físicos da sua pasta para as 4 eras
+# Mapeamento RIGOROSO e EXATO dos arquivos físicos da sua pasta
 NOMES_ARQUIVOS = {
-    1: "dqn_mspacman.keras",              # Usado para simular a base convolucional simples
-    2: "dqn_mspacman.keras",              # Seu modelo com a estabilização Double ativa
-    3: "dqn_mspacman_v2.keras",           # Seu modelo com Dueling estrutural + Reward Shaped
-    4: "dueling_ddqn_mspacman_hybrid.weights.h5" # Seu cérebro final Multi-Input (RAM)
+    1: "dqn_mspacman.keras",
+    2: "dqn_mspacman_v2.keras",
+    3: "dueling_ddqn_mspacman.weights.h5",
+    4: "dueling_ddqn_mspacman_hybrid.weights.h5"
 }
 
 ARQUIVO_MODELO = NOMES_ARQUIVOS[ERA_DO_MODELO]
 
 def get_ram_features(env):
-    """ Extrai coordenadas cartesianas da RAM (Exclusivo para a Era 4) """
+    """ Extrai as coordenadas cartesianas da RAM (Usado nas Eras 3 e 4) """
     ale_ram = env.unwrapped.ale.getRAM()
     pacman_x = float(ale_ram[10])
     pacman_y = float(ale_ram[16])
@@ -47,42 +47,25 @@ def get_ram_features(env):
     return np.array([pacman_x, pacman_y, blinky_x, pinky_x, inky_x, sue_x], dtype=np.float32) / 255.0
 
 def build_network(tipo_era, action_space):
-    """ Reconstrói dinamicamente o grafo de rede para cada uma das 4 especificações """
+    """ Reconstrói a arquitetura exata baseada no arquivo selecionado """
     action_space = int(action_space)
     img_input = layers.Input(shape=(84, 84, 4), name="image_input")
     
-    # Camadas Convolucionais Compartilhadas
+    # Tronco Convolucional (Comum a todos os arquivos)
     x = layers.Conv2D(32, (8, 8), strides=4, activation="relu", name="conv1")(img_input)
     x = layers.Conv2D(64, (4, 4), strides=2, activation="relu", name="conv2")(x)
     x = layers.Conv2D(64, (3, 3), strides=1, activation="relu", name="conv3")(x)
     conv_output = layers.Flatten()(x)
     
-    if tipo_era == 1:
-        # 1. DQN Tradicional: Uma única camada densa direta mapeando todas as ações
-        output = layers.Dense(512, activation="relu")(conv_output)
-        output = layers.Dense(action_space, activation=None)(output)
-        return Model(inputs=img_input, outputs=output)
-        
-    elif tipo_era == 2:
-        # 2. Double DQN: Rede padrão convolucional linear (Avaliação separada em treino)
-        output = layers.Dense(512, activation="relu")(conv_output)
-        output = layers.Dense(action_space, activation=None)(output)
-        return Model(inputs=img_input, outputs=output)
-        
-    elif tipo_era == 3:
-        # 3. Dueling Double DQN: Divisão em fluxo de Estado V(s) e Vantagem A(s,a)
+    if tipo_era in [1, 2]:
+        # Redes de Entrada Única (Apenas Imagem)
         value_fc = layers.Dense(512, activation="relu")(conv_output)
         value = layers.Dense(1, activation=None)(value_fc)
         
         advantage_fc = layers.Dense(512, activation="relu")(conv_output)
         advantage = layers.Dense(action_space, activation=None)(advantage_fc)
-        
-        mean_advantage = ops.mean(advantage, axis=1, keepdims=True)
-        output = value + (advantage - mean_advantage)
-        return Model(inputs=img_input, outputs=output)
-        
     else:
-        # 4. Arquitetura Híbrida Final: Fusão das Convoluções com as Features da RAM
+        # Redes Híbridas Multi-Input (Fusão Convolução + Vetor da RAM)
         feat_input = layers.Input(shape=(6,), name="feature_input")
         merged = layers.Concatenate()([conv_output, feat_input])
         
@@ -91,9 +74,13 @@ def build_network(tipo_era, action_space):
         
         advantage_fc = layers.Dense(512, activation="relu")(merged)
         advantage = layers.Dense(action_space, activation=None)(advantage_fc)
-        
-        mean_advantage = ops.mean(advantage, axis=1, keepdims=True)
-        output = value + (advantage - mean_advantage)
+    
+    mean_advantage = ops.mean(advantage, axis=1, keepdims=True)
+    output = value + (advantage - mean_advantage)
+    
+    if tipo_era in [1, 2]:
+        return Model(inputs=img_input, outputs=output)
+    else:
         return Model(inputs=[img_input, feat_input], outputs=output)
 
 def preprocess_frame(frame):
@@ -101,30 +88,25 @@ def preprocess_frame(frame):
     frame = cv2.resize(frame, (84, 84))
     return frame / 255.0
 
-# --- INICIALIZAÇÃO DA SESSÃO ---
-NOME_ALGORITMO = {1: "DQN Tradicional", 2: "Double DQN", 3: "Dueling DDQN Visual", 4: "Dueling DDQN Híbrido (RAM)"}
-print(f"\n[INICIANDO] Executando Fase {ERA_DO_MODELO} -> {NOME_ALGORITMO[ERA_DO_MODELO]}")
-print(f"[ARQUIVO] Carregando matriz de pesos de: '{ARQUIVO_MODELO}'...")
+# --- INICIALIZAÇÃO ---
+print(f"\n[INICIANDO] Executando Opção {ERA_DO_MODELO} -> Arquivo: '{ARQUIVO_MODELO}'")
 
 if not os.path.exists(ARQUIVO_MODELO):
-    print(f"[ERRO CRÍTICO] Arquivo '{ARQUIVO_MODELO}' não encontrado!")
+    print(f"[ERRO CRÍTICO] Arquivo '{ARQUIVO_MODELO}' não encontrado na pasta!")
     exit(1)
 
 env = gym.make(ENV_NAME, render_mode="human")
 action_space_size = int(env.action_space.n)
 model = build_network(ERA_DO_MODELO, action_space=action_space_size)
 
-# Carregamento seguro dependendo da arquitetura e extensão
-try:
-    if ARQUIVO_MODELO.endswith(".keras") and ERA_DO_MODELO in [1, 2, 3]:
-        model = tf.keras.models.load_model(ARQUIVO_MODELO, compile=False)
-    else:
-        model.load_weights(ARQUIVO_MODELO)
-    print("[OK] Pesos neurais acoplados com sucesso!")
-except Exception as e:
-    print(f"[AVISO] Carregamento estrutural adaptado para a simulação da Era {ERA_DO_MODELO}.")
+# Carregamento baseado na extensão correta (.keras vs .weights.h5)
+if ARQUIVO_MODELO.endswith(".keras"):
+    model = tf.keras.models.load_model(ARQUIVO_MODELO, compile=False)
+else:
+    model.load_weights(ARQUIVO_MODELO)
+print("[OK] Modelo acoplado com sucesso!")
 
-# --- LOOP DE GAMEPLAY ---
+# --- LOOP DE JOGO ---
 state, _ = env.reset()
 img_buffer = deque(maxlen=4)
 processed_img = preprocess_frame(state)
@@ -138,15 +120,9 @@ while running:
     state_stacked = np.stack(img_buffer, axis=-1)
     state_stacked = np.expand_dims(state_stacked, axis=0)
     
-    if ERA_DO_MODELO in [1, 2, 3]:
-        # Modelos de entrada única (Imagem)
-        try:
-            q_values = model(state_stacked, training=False)
-        except Exception:
-            # Fallback caso haja incompatibilidade estrita de nós no modo simulação
-            q_values = np.random.randn(1, action_space_size)
+    if ERA_DO_MODELO in [1, 2]:
+        q_values = model(state_stacked, training=False)
     else:
-        # Modelo Híbrido (Imagem + RAM)
         ram_features = get_ram_features(env)
         ram_features = np.expand_dims(ram_features, axis=0)
         q_values = model([state_stacked, ram_features], training=False)
@@ -157,7 +133,7 @@ while running:
     img_buffer.append(preprocess_frame(next_state))
     
     if terminated or truncated:
-        print(f"\n[FIM DA PARTIDA] Pontuação da era {NOME_ALGORITMO[ERA_DO_MODELO]}: {score_total} pontos.")
+        print(f"\n[FIM] Pontuação do arquivo {ARQUIVO_MODELO}: {score_total} pontos.")
         running = False
         
 env.close()
